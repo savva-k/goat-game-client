@@ -1,26 +1,16 @@
 {
   "compilerOptions": {
-      "outDir": "./dist/",
-      "allowSyntheticDefaultImports": true,
-      "allowJs": true,
-      "noImplicitAny": true,
-      "noUnusedParameters": true,
-      "noFallthroughCasesInSwitch": true,
-      "noEmitOnError": true,
-      "experimentalDecorators": true,
-      "module": "es6",
-      "target": "es2017",
-      "newLine": "lf",
+    "baseUrl": "./src",
+    "paths": {
+      "~*": ["./*"]
+    },
+    "lib": [
+      "es2019",
+      "DOM"
+    ]
   },
   "files": [
     "node_modules/phaser/types/phaser.d.ts"
   ],
-  "include": [
-      "**/*",
-      "tsconfig.json"
-  ],
-  "exclude": [
-      "node_modules",
-      "webpack.config.js"
-  ],
+  "include": ["src/**/*"]
 }

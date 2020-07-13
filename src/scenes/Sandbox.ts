@@ -1,7 +1,7 @@
 import { BaseScene } from "./BaseScene";
 import { Card } from "../model/Card";
-import { Point } from "../model/Point"
-import { Player } from "../model/Player";
+
+import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 
 export class Sandbox extends BaseScene {
 
@@ -11,29 +11,34 @@ export class Sandbox extends BaseScene {
         super(config);
     }
 
+    private colors: Array<string> = ['CLUBS', 'HEARTS', 'DIAMONDS', 'SPADES'];
+    private faces: Array<string> = ['TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT',
+                                    'NINE', 'TEN', 'JACK', 'QUEEN', 'KING', 'ACE'];
 
-    private colors: Array<string> = ['S', 'D', 'H', 'C'];
-    private faces: Array<string> = ['2', '3', '4', '5', '6', '7', '8', '9', '0', 'J', 'D', 'K', 'A'];
-
+    private socket: Client;
+    private gameStateSubscription: StompSubscription;
+    private tableId: string;
     private players: Array<Player> = [];
 
     private cards: Card[] = [];
 
-    private positions: Array<any> = [
+    private cardGroups = new Map<string, Phaser.GameObjects.Group>();
+
+    private positions: Array<CardDestination> = [
         {
             x: 500,
             y: 190,
-            type: 'player'
+            type: 'player1'
         },
         {
             x: 340,
             y: 300,
-            type: 'player'
+            type: 'player2'
         },
         {
             x: 180,
             y: 190,
-            type: 'player'
+            type: 'player3'
         },
         {
             x: 340,
@@ -42,32 +47,19 @@ export class Sandbox extends BaseScene {
         }
     ];
 
-    private cardsInTalon = 0;
-    private giveCardsLap = 0;
-
-    private player: Phaser.Physics.Arcade.Sprite;
-
-    public preload(): void {
-        this.load.setBaseURL('/src');
-        this.load.image('background', './assets/table_background.jpg');
-        this.load.image('player1', './assets/player_avatars/1.png');
-        this.load.image('player2', './assets/player_avatars/2.png');
-        this.load.image('player3', './assets/player_avatars/3.png');
-        //this.load.image('ground', './assets/ground.png');
-        this.load.spritesheet('cards', './assets/cards.png', { frameWidth: 62, frameHeight: 84 });
-        this.load.spritesheet('player-selection', './assets/player_selection.png', { frameWidth: 102, frameHeight: 102 });
-        //this.load.spritesheet('player', './assets/player.png', { frameWidth: 64, frameHeight: 64 });
-        
+    public init(data: any) {
+        this.socket = data.socket;
+        this.tableId = data.tableId;
     }
 
     public create(): void {
+        this.gameStateSubscription = this.socket.subscribe('/topic/games/' + this.tableId + '/state', (message: IMessage) => {
+            console.dir(message.body);
+        });
+
         this.createBackround();
-        this.generateCards();
-        this.shuffleDeck();
         this.createPlayers();
-
-        this.giveCards([...this.cards], 0);
-
+        this.giveCards();
     }
 
     public update(): void {
@@ -78,38 +70,50 @@ export class Sandbox extends BaseScene {
         this.add.image(400, 300, 'background');
     }
 
-    private giveCards(cards: Array<Card>, position: number) {
-        if (cards.length == 0) return;
-        if (position >= this.positions.length) position = 0;
-        let cardDestination = this.positions[position];
+    private giveCards() {
+        let cardsInTalon = 0;
+        let position = 0;
 
-        if (cardDestination.type === 'talon') {
-            if (this.cardsInTalon >= 2 || this.giveCardsLap < 2) {
-                this.giveCards(cards, ++position);
-                this.giveCardsLap++;
-                return;
-            } else {
-                this.cardsInTalon++;
+        for (let currentIteration = 0; currentIteration < 26; currentIteration++) {
+            if (position >= this.positions.length) position = 0;
+            let card = this.generateCard();
+            let cardDestination = this.positions[position];
+
+            if (cardDestination.type === 'talon') {
+                if (cardsInTalon < 2 && currentIteration > 9) {
+                    cardsInTalon++;
+                } else {
+                    if (++position >= this.positions.length) position = 0;
+                    cardDestination = this.positions[position];
+                }
             }
+
+            this.time.addEvent({
+                delay: currentIteration * 300,
+                callback: () => {
+                    this.moveCard(card, cardDestination);
+                }
+            });
+            
+            if (!this.cardGroups.get(cardDestination.type)) {
+                this.cardGroups.set(cardDestination.type, this.add.group());
+            }
+            this.cardGroups.get(cardDestination.type).add(card);
+
+            position++;
         }
+    }
 
-        let card = cards.pop();
-        console.dir(card);
-        this.children.bringToTop(card);
-
+    private moveCard(card: Card, cardDestination: CardDestination) {
         let tween = this.tweens.add({
             targets: card,
-            // alpha: 1,
-            // alpha: '+=1',
             ...cardDestination,
-            ease: 'Cubic',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
+            ease: 'Cubic',
             duration: 400,
-            repeat: 0,            // -1: infinity
+            repeat: 0,
             yoyo: false
         });
-        tween.setCallback('onComplete', () => {
-            this.giveCards(cards, ++position);
-        }, []);
+        this.sound.play('take-card-sound');
     }
 
     private createPlayers() {
@@ -137,17 +141,6 @@ export class Sandbox extends BaseScene {
 
     }
 
-    private shuffleDeck() {
-        let x = 75;
-        let y = 75;
-        this.cards = this.shuffle(this.cards);
-
-        for (let card of this.cards) {
-            card.x = x;
-            card.y = y;
-        }
-    }
-
     private getFrameByCardFace(face: string): integer {
         let color = face.charAt(0);
         let value = face.charAt(1);
@@ -156,27 +149,14 @@ export class Sandbox extends BaseScene {
         return this.faces.length * row + column;
     }
 
-    private generateCards() {
-        let x = 305;
-        let y = 305;
+    private generateCard(): Card {
+        let x = 75;
+        let y = 75;
 
-        for (let color of this.colors) {
-            for (let face of this.faces) {
-                let cardValue = color + face;
-                let card = new Card(this, x, y, this.getFrameByCardFace(cardValue))
-                card.face = cardValue;;
-                this.add.existing(card);
-                this.cards.push(card);
-            }
-        }
-    }
-
-    private shuffle(a) {
-        for (let i = a.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [a[i], a[j]] = [a[j], a[i]];
-        }
-        return a;
+        let card = new Card(this, x, y, 52);
+        this.add.existing(card);
+        this.cards.push(card);
+        return card;
     }
 
 }
