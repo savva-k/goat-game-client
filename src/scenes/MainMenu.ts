@@ -1,6 +1,5 @@
 import { BaseScene } from "./BaseScene";
-import { Client } from '@stomp/stompjs';
-import { post } from '../util/Http'
+import { Client, StompSubscription, IMessage } from '@stomp/stompjs';
 import button_hover_sound from '../assets/sound/button_hover.ogg';
 import button_click_sound from '../assets/sound/button_click.wav';
 import take_card_sound from '../assets/sound/taking_card.wav';
@@ -13,6 +12,9 @@ export class MainMenu extends BaseScene {
 
     private socket: Client;
     private loginForm: Phaser.GameObjects.DOMElement;
+
+    private gameCreatedSubscription: StompSubscription;
+    private playerJoinedSubscription: StompSubscription;
 
     constructor(
         config: string | Phaser.Types.Scenes.SettingsConfig
@@ -38,6 +40,7 @@ export class MainMenu extends BaseScene {
     }
 
     public create(): void {
+        this.gameCreatedSubscription = this.socket.subscribe('/user/topic/game/create/success', this.handleCreateJoinMessage);
         this.loginForm = this.add.dom(100, 200).createFromHTML(`
         <style>
             .button-container {
@@ -113,10 +116,9 @@ export class MainMenu extends BaseScene {
         if (event.target.id === 'create-table-button') {
             console.log('creating a table');
             let playerName = this.loginForm.getChildByName('username').value;
-            post('/game/create', { playerName: playerName }, (response) => {
-                if (response.tableId) {
-                    this.scene.start('Lobby', { tableId: response.tableId, socket: this.socket, playerName: playerName });
-                }
+            this.socket.publish({
+                destination: '/app/game/create',
+                body: JSON.stringify({ playerName: playerName })
             });
         }
     }
@@ -126,11 +128,37 @@ export class MainMenu extends BaseScene {
             console.log('joining a table');
             let playerName = this.loginForm.getChildByName('username').value;
             let tableId = this.loginForm.getChildByName('table-id').value;
-            post('/game/' + tableId + '/join', { playerName: playerName }, (response) => {
-                if (response.tableId) {
-                    this.scene.start('Lobby', { tableId: response.tableId, socket: this.socket });
-                }
+
+            if (this.playerJoinedSubscription) {
+                this.playerJoinedSubscription.unsubscribe();
+            }
+
+
+            this.playerJoinedSubscription = this.socket.subscribe(
+                '/user/topic/games/' + tableId + '/player_added',
+                this.handleCreateJoinMessage
+            );
+
+            setTimeout(() => {
+                this.socket.publish({
+                    destination: '/app/game/' + tableId + '/players/add',
+                    body: JSON.stringify({ playerName: playerName })
+                }),
+                1000
             });
+
+        }
+    }
+
+    private handleCreateJoinMessage = (message: IMessage) => {
+        let state = JSON.parse(message.body);
+        console.log('=============================================');
+        console.dir(state);
+        console.log('=============================================');
+        if (state.tableId) {
+            this.gameCreatedSubscription && this.gameCreatedSubscription.unsubscribe();
+            this.playerJoinedSubscription && this.playerJoinedSubscription.unsubscribe();
+            this.scene.start('Lobby', { state: state, socket: this.socket });
         }
     }
 

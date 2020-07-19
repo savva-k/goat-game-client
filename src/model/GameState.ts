@@ -1,4 +1,8 @@
 interface GameState {
+    tableId: string;
     currentScene: string;
-    players: Array<Player>
+    currentUser: PlayerVO
+    currentPlayer: PlayerVO;
+    leftNeighbour: PlayerVO;
+    rightNeighbour: PlayerVO;
 }

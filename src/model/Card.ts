@@ -1,6 +1,7 @@
 export class Card extends Phaser.Physics.Arcade.Sprite {
 
     public face: string;
+    public reachedDestination = false;
 
     constructor(scene: Phaser.Scene, x: number, y: number, frame?: string | integer) {
         super(scene, x, y, 'cards', frame);

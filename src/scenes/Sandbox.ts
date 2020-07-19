@@ -1,5 +1,6 @@
 import { BaseScene } from "./BaseScene";
 import { Card } from "../model/Card";
+import { Player } from "../model/Player";
 
 import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 
@@ -11,50 +12,46 @@ export class Sandbox extends BaseScene {
         super(config);
     }
 
-    private colors: Array<string> = ['CLUBS', 'HEARTS', 'DIAMONDS', 'SPADES'];
-    private faces: Array<string> = ['TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT',
+    readonly CARDS_NUMBER = 25;
+    readonly CARD_SHIRT_FRAME = 52;
+    readonly GIVE_CARD_DELAY = 300;
+    readonly TALON_DESTINATION = 'talon';
+
+    private suits: Array<string> = ['CLUBS', 'HEARTS', 'DIAMONDS', 'SPADES'];
+    private ranks: Array<string> = ['TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT',
                                     'NINE', 'TEN', 'JACK', 'QUEEN', 'KING', 'ACE'];
 
     private socket: Client;
     private gameStateSubscription: StompSubscription;
-    private tableId: string;
-    private players: Array<Player> = [];
+    private neighbourPlayersSubscription: StompSubscription;
 
-    private cards: Card[] = [];
+    private grabCardsEvent: Phaser.Time.TimerEvent;
+
+    private state: GameState;
+
+    private currentPlayer: Player;
+    private leftNeighbour: Player;
+    private rightNeighbour: Player;
+    private players: Array<Player> = [];
+    private talon: Talon;
 
     private cardGroups = new Map<string, Phaser.GameObjects.Group>();
-
-    private positions: Array<CardDestination> = [
-        {
-            x: 500,
-            y: 190,
-            type: 'player1'
-        },
-        {
-            x: 340,
-            y: 300,
-            type: 'player2'
-        },
-        {
-            x: 180,
-            y: 190,
-            type: 'player3'
-        },
-        {
-            x: 340,
-            y: 75,
-            type: 'talon'
-        }
-    ];
+    private cards: Array<Card> = [];
 
     public init(data: any) {
         this.socket = data.socket;
-        this.tableId = data.tableId;
+        this.state = data.state;
+        this.talon = {
+            receiveCardX: 340,
+            receiveCardY: 75,
+            cardsCount: 0
+         };
+         console.dir(this.state);
     }
 
     public create(): void {
-        this.gameStateSubscription = this.socket.subscribe('/topic/games/' + this.tableId + '/state', (message: IMessage) => {
-            console.dir(message.body);
+        this.gameStateSubscription = this.socket.subscribe('/user/topic/games/' + this.state.tableId + '/state', (message: IMessage) => {
+            //console.dir(message.body);
         });
 
         this.createBackround();
@@ -70,92 +67,174 @@ export class Sandbox extends BaseScene {
         this.add.image(400, 300, 'background');
     }
 
-    private giveCards() {
-        let cardsInTalon = 0;
-        let position = 0;
+    private giveCards = () => {
+        let playerToGiveCard = this.leftNeighbour;
+        let previousDestination: string;
+        let totalDelay = 0;
+        let dealer = this.players.find(p => p.dealer);
 
-        for (let currentIteration = 0; currentIteration < 26; currentIteration++) {
-            if (position >= this.positions.length) position = 0;
-            let card = this.generateCard();
-            let cardDestination = this.positions[position];
+        for (let currentIteration = 0; currentIteration <= this.CARDS_NUMBER; currentIteration++) {
+            let card = this.generateCard(dealer.x, dealer.y);
+            let cardDestination = playerToGiveCard.role;
+            let cardDestinationX = playerToGiveCard.receiveCardX;
+            let cardDestinationY = playerToGiveCard.receiveCardY;
 
-            if (cardDestination.type === 'talon') {
-                if (cardsInTalon < 2 && currentIteration > 9) {
-                    cardsInTalon++;
-                } else {
-                    if (++position >= this.positions.length) position = 0;
-                    cardDestination = this.positions[position];
-                }
+            if (this.talon.cardsCount < 2 && currentIteration > 9 && previousDestination != this.TALON_DESTINATION) {
+                this.talon.cardsCount++;
+                cardDestinationX = this.talon.receiveCardX;
+                cardDestinationY = this.talon.receiveCardY;
+                cardDestination = this.TALON_DESTINATION;
+            } else {
+                playerToGiveCard = this.swithPlayerToGiveCard(playerToGiveCard);
+                previousDestination = cardDestination;
             }
 
+            let delay = currentIteration * this.GIVE_CARD_DELAY;
+            totalDelay += delay;
+
             this.time.addEvent({
-                delay: currentIteration * 300,
+                delay: delay,
                 callback: () => {
-                    this.moveCard(card, cardDestination);
+                    this.giveCard(card, cardDestinationX, cardDestinationY);
                 }
             });
             
-            if (!this.cardGroups.get(cardDestination.type)) {
-                this.cardGroups.set(cardDestination.type, this.add.group());
+            if (!this.cardGroups.get(cardDestination)) {
+                this.cardGroups.set(cardDestination, this.add.group());
             }
-            this.cardGroups.get(cardDestination.type).add(card);
+            this.cardGroups.get(cardDestination).add(card);
+            this.cards.push(card);
+        }
 
-            position++;
+        this.grabCardsEvent = this.time.addEvent({
+            delay: 1000,
+            loop: true,
+            callback: () => {
+                if (this.cards.filter(c => !c.reachedDestination).length === 0) {
+                    this.players.forEach(p => {
+                        this.takeCards(this.cardGroups.get(p.role), p.x, p.y);
+                    });
+                    this.grabCardsEvent.remove(false);
+                }
+            }
+        });
+    }
+
+    private swithPlayerToGiveCard = (currentPlayerToGiveCard: Player) => {
+        if (currentPlayerToGiveCard === this.leftNeighbour) {
+            return this.rightNeighbour;
+        } else if (currentPlayerToGiveCard === this.rightNeighbour) {
+            return this.currentPlayer;
+        } else {
+            return this.leftNeighbour;
         }
     }
 
-    private moveCard(card: Card, cardDestination: CardDestination) {
-        let tween = this.tweens.add({
+    private giveCard(card: Card, x: number, y: number) {
+        this.tweens.add({
             targets: card,
-            ...cardDestination,
+            x: x,
+            y: y,
             ease: 'Cubic',
             duration: 400,
             repeat: 0,
-            yoyo: false
+            yoyo: false,
+            callback: () => {
+                card.reachedDestination = true;
+            }
+        });
+        this.sound.play('take-card-sound');
+    }
+
+    private takeCards(cards: Phaser.GameObjects.Group, x: number, y: number) {
+        console.dir(cards);
+
+        cards.getChildren().forEach(card => {
+            this.tweens.add({
+                targets: card,
+                alpha: { value: 0, duration: 2000, ease: 'Power1' },
+                x: x,
+                y: y,
+                ease: 'Cubic',
+                duration: 400,
+                repeat: 0,
+                yoyo: false
+            });
         });
         this.sound.play('take-card-sound');
     }
 
     private createPlayers() {
-        // let positions:any = {
-        //     player1: [ new Point(300, 300) ],
-        //     player2: [],
-        //     player3: [],
-        // };
+        this.currentPlayer = this.createPlayer(
+            75,
+            300,
+            340,
+            300,
+            this.state.currentUser.current,
+            this.state.currentUser.dealer,
+            this.state.currentUser.role,
+            this.state.currentUser.name
+            );
 
+        this.leftNeighbour = this.createPlayer(
+            75,
+            75,
+            180,
+            190,
+            this.state.leftNeighbour.current,
+            this.state.leftNeighbour.dealer,
+            this.state.leftNeighbour.role,
+            this.state.leftNeighbour.name
+            );
+
+        this.rightNeighbour = this.createPlayer(
+            592,
+            75,
+            500,
+            190,
+            this.state.rightNeighbour.current,
+            this.state.rightNeighbour.dealer,
+            this.state.rightNeighbour.role,
+            this.state.rightNeighbour.name
+            );
         
-        let playersGroup = this.physics.add.staticGroup([
-            this.add.image(75, 75, 'player2'),
-            this.add.image(75, 75, 'player-selection', 0),
-            this.add.image(592, 75, 'player1'),
-            this.add.image(592, 75, 'player-selection', 1),
-            this.add.image(75, 300, 'player3'),
-            this.add.image(75, 300, 'player-selection', 1)
-        ]);
-
-        playersGroup.children.each((player: Phaser.GameObjects.Image) => {
-            player.displayWidth = 100;
-            player.displayHeight = 100;
-        })
-
-
+        this.players = [ this.currentPlayer, this.leftNeighbour, this.rightNeighbour ];
     }
 
-    private getFrameByCardFace(face: string): integer {
-        let color = face.charAt(0);
-        let value = face.charAt(1);
-        let row = this.colors.indexOf(color);
-        let column = this.faces.indexOf(value);
-        return this.faces.length * row + column;
+    private createPlayer(
+        x: number,
+        y: number,
+        receiveCardX: number,
+        receiveCardY: number,
+        current: boolean,
+        dealer: boolean,
+        role: string,
+        name: string): Player {
+
+        let player = new Player();
+        player.avatar = this.add.image(0, 0, role);
+        player.role = role;
+        player.selection = this.add.image(0, 0, 'player-selection', 1);
+        player.name = this.add.text(0, 0, name, { color: '#faf600' }).setOrigin(0.5);
+        player.x = x;
+        player.y = y;
+        player.receiveCardX = receiveCardX;
+        player.receiveCardY = receiveCardY;
+        player.dealer = dealer;
+        player.current = current;
+
+        return player;
     }
 
-    private generateCard(): Card {
-        let x = 75;
-        let y = 75;
+    private getCardFrame(suite: string, rank: string): integer {
+        let row = this.suits.indexOf(suite);
+        let column = this.ranks.indexOf(rank);
+        return this.ranks.length * row + column;
+    }
 
-        let card = new Card(this, x, y, 52);
+    private generateCard(fromX: number, fromY: number): Card {
+        let card = new Card(this, fromX, fromY, this.CARD_SHIRT_FRAME);
         this.add.existing(card);
-        this.cards.push(card);
         return card;
     }
 

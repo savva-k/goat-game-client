@@ -5,33 +5,26 @@ import { Lobby } from "./scenes/Lobby";
 
 export class Game extends Phaser.Game {
 
-    private tableId: string;
+    private socket: Client;
 
     constructor(config: any) {        
         super(config);
-        let socket = this.connectToServer(config);
-        socket.activate();
+        this.socket = this.connectToServer(config);
+        this.socket.activate();
         this.scene.add("Sandbox", Sandbox);
         this.scene.add("MainMenu", MainMenu);
         this.scene.add("Lobby", Lobby);
-        this.scene.start('MainMenu', { socket: socket });
     }
     
-    private connectToServer(config: any): Client {
+    private connectToServer = (config: any): Client => {
         let socket = new Client({
             brokerURL: "ws://192.168.0.45:3000/game",
-            debug: (str) => console.log(str)
+            //debug: (str) => console.log(str)
         });
 
-        socket.onConnect = function(frame) {
+        socket.onConnect = (frame) => {
             console.log('Connected...');
-            // socket.subscribe('/topic/game/new_game_created', (message) => {
-            //     let response = JSON.parse(message.body);
-            //     this.tableId = response.tableId;
-            //     socket.subscribe("/topic/" + this.tableId, (message) => {
-            //         console.log(message.body);
-            //     });
-            // });
+            this.scene.start('MainMenu', { socket: this.socket });
         };
 
         socket.onStompError = function(frame) {
@@ -42,6 +35,7 @@ export class Game extends Phaser.Game {
         socket.onDisconnect = function(fram) {
             console.log('Disconnected');
         }
+
         return socket;
     }
 }
