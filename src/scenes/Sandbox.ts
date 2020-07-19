@@ -15,6 +15,8 @@ export class Sandbox extends BaseScene {
     readonly CARDS_NUMBER = 25;
     readonly CARD_SHIRT_FRAME = 52;
     readonly GIVE_CARD_DELAY = 300;
+    readonly CARD_DISTANCE_SHIFT = 62;
+    readonly PLAYER_CARDS_START_X = 170;
     readonly TALON_DESTINATION = 'talon';
 
     private suits: Array<string> = ['CLUBS', 'HEARTS', 'DIAMONDS', 'SPADES'];
@@ -26,6 +28,7 @@ export class Sandbox extends BaseScene {
     private neighbourPlayersSubscription: StompSubscription;
 
     private grabCardsEvent: Phaser.Time.TimerEvent;
+    private background: Phaser.GameObjects.Image;
 
     private state: GameState;
 
@@ -37,6 +40,8 @@ export class Sandbox extends BaseScene {
 
     private cardGroups = new Map<string, Phaser.GameObjects.Group>();
     private cards: Array<Card> = [];
+
+    private playzoneHighlighting: Phaser.GameObjects.Shape;
 
     public init(data: any) {
         this.socket = data.socket;
@@ -55,8 +60,11 @@ export class Sandbox extends BaseScene {
         });
 
         this.createBackround();
+        this.playzoneHighlighting = this.add.rectangle(300, 150, 300, 150, 0xFF9900, 0.5);
+        this.playzoneHighlighting.setVisible(false);
         this.createPlayers();
         this.giveCards();
+
     }
 
     public update(): void {
@@ -64,17 +72,21 @@ export class Sandbox extends BaseScene {
 
 
     private createBackround() {
-        this.add.image(400, 300, 'background');
+        this.background = this.add.image(400, 300, 'background');
+    }
+
+    private swithPlayzoneHighlighting = () => {
+        this.playzoneHighlighting.setVisible(!this.playzoneHighlighting.visible);
     }
 
     private giveCards = () => {
         let playerToGiveCard = this.leftNeighbour;
         let previousDestination: string;
-        let totalDelay = 0;
         let dealer = this.players.find(p => p.dealer);
 
         for (let currentIteration = 0; currentIteration <= this.CARDS_NUMBER; currentIteration++) {
-            let card = this.generateCard(dealer.x, dealer.y);
+            let card = this.generateCard(dealer.x, dealer.y, this.CARD_SHIRT_FRAME);
+
             let cardDestination = playerToGiveCard.role;
             let cardDestinationX = playerToGiveCard.receiveCardX;
             let cardDestinationY = playerToGiveCard.receiveCardY;
@@ -90,12 +102,10 @@ export class Sandbox extends BaseScene {
             }
 
             let delay = currentIteration * this.GIVE_CARD_DELAY;
-            totalDelay += delay;
-
             this.time.addEvent({
                 delay: delay,
                 callback: () => {
-                    this.giveCard(card, cardDestinationX, cardDestinationY);
+                    this.moveCard(card, cardDestinationX, cardDestinationY);
                 }
             });
             
@@ -115,6 +125,7 @@ export class Sandbox extends BaseScene {
                         this.takeCards(this.cardGroups.get(p.role), p.x, p.y);
                     });
                     this.grabCardsEvent.remove(false);
+                    this.showPlayersCards();
                 }
             }
         });
@@ -130,7 +141,36 @@ export class Sandbox extends BaseScene {
         }
     }
 
-    private giveCard(card: Card, x: number, y: number) {
+    private showPlayersCards = () => {
+        this.currentPlayer.hand = [];
+
+        this.state.currentUser.hand.forEach(cardVO => {
+            let frame = this.getCardFrame(cardVO.suite, cardVO.rank);
+            let card = this.generateCard(
+                this.currentPlayer.x,
+                this.currentPlayer.y,
+                frame,
+                cardVO.suite,
+                cardVO.rank
+            );
+            this.currentPlayer.hand.push(card);
+        });
+
+        let x = this.PLAYER_CARDS_START_X;
+        let y = this.currentPlayer.y;
+
+        this.currentPlayer.hand.forEach(card => {
+            this.time.addEvent({
+                delay: this.GIVE_CARD_DELAY,
+                callback: () => {
+                    this.moveCard(card, x, y);
+                    x += this.CARD_DISTANCE_SHIFT;
+                }
+            });
+        });
+    }
+
+    private moveCard(card: Card, x: number, y: number) {
         this.tweens.add({
             targets: card,
             x: x,
@@ -232,8 +272,11 @@ export class Sandbox extends BaseScene {
         return this.ranks.length * row + column;
     }
 
-    private generateCard(fromX: number, fromY: number): Card {
-        let card = new Card(this, fromX, fromY, this.CARD_SHIRT_FRAME);
+    private generateCard(fromX: number, fromY: number, spriteFrame: number, suite?: string, rank?: string): Card {
+        let card = new Card(this, fromX, fromY, spriteFrame);
+        card.suite = suite;
+        card.rank = rank;
+        card.switchLigting = this.swithPlayzoneHighlighting;
         this.add.existing(card);
         return card;
     }

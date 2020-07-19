@@ -4,4 +4,5 @@ interface PlayerVO {
     role: string;
     current: boolean;
     dealer: boolean;
+    hand: Array<CardVO>;
 }

@@ -4,6 +4,7 @@ import button_hover_sound from '../assets/sound/button_hover.ogg';
 import button_click_sound from '../assets/sound/button_click.wav';
 import take_card_sound from '../assets/sound/taking_card.wav';
 import bgimage from '../assets/table_background.jpg';
+import pixelMap from '../assets/images/pixel_map.png';
 import avatars from '../assets/player_avatars/*.png';
 import cards from '../assets/cards.png';
 import playersSelection from '../assets/player_selection.png';
@@ -31,7 +32,7 @@ export class MainMenu extends BaseScene {
         this.load.audio('button-hover-sound', button_hover_sound);
         this.load.audio('take-card-sound', take_card_sound);
 
-        this.load.image('background', bgimage);
+        this.load.image('background', [ bgimage, pixelMap ]);
         this.load.image('player1', avatars.player1);
         this.load.image('player2', avatars.player2);
         this.load.image('player3', avatars.player3);

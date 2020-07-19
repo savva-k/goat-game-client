@@ -1,9 +1,12 @@
+import { Card } from "./Card";
+
 export class Player {
 
     readonly AVATAR_WIDTH = 100;
     readonly AVATAR_HEIGHT = 100;
 
     private _avatar: Phaser.GameObjects.Image;
+
     private _x: number;
     private _y: number;
     private _current: boolean;
@@ -14,6 +17,8 @@ export class Player {
     receiveCardY: number;
     role: string;
     dealer: boolean;
+
+    hand: Array<Card>;
 
     get x(): number {
         return this._x;
