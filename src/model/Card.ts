@@ -4,6 +4,7 @@ export class Card extends Phaser.Physics.Arcade.Sprite {
     public rank: string;
     public reachedDestination = false;
     public switchLigting: () => void;
+    public playCard: (card: Card) => void;
 
     public startX: number;
     public startY: number;
@@ -22,7 +23,11 @@ export class Card extends Phaser.Physics.Arcade.Sprite {
         })
         .on('dragend', function(pointer, dragX, dragY, dropped){
             this.switchLigting();
-            this.setPosition(this.startX, this.startY);
+            this.playCard(this);
         }, this);
+    }
+
+    public returnCard = () => {
+        this.setPosition(this.startX, this.startY);
     }
 }

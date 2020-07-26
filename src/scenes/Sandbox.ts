@@ -1,7 +1,7 @@
 import { BaseScene } from "./BaseScene";
 import { Card } from "../model/Card";
 import { Player } from "../model/Player";
-
+import  { Geom } from 'phaser';
 import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 
 export class Sandbox extends BaseScene {
@@ -25,6 +25,7 @@ export class Sandbox extends BaseScene {
 
     private socket: Client;
     private gameStateSubscription: StompSubscription;
+    private playerMadeTurnSubscription: StompSubscription;
     private neighbourPlayersSubscription: StompSubscription;
 
     private grabCardsEvent: Phaser.Time.TimerEvent;
@@ -41,7 +42,7 @@ export class Sandbox extends BaseScene {
     private cardGroups = new Map<string, Phaser.GameObjects.Group>();
     private cards: Array<Card> = [];
 
-    private playzoneHighlighting: Phaser.GameObjects.Shape;
+    private playzoneHighlighting: Phaser.GameObjects.Rectangle;
 
     public init(data: any) {
         this.socket = data.socket;
@@ -58,6 +59,11 @@ export class Sandbox extends BaseScene {
         this.gameStateSubscription = this.socket.subscribe('/user/topic/games/' + this.state.tableId + '/state', (message: IMessage) => {
             //console.dir(message.body);
         });
+
+        this.playerMadeTurnSubscription = this.socket.subscribe(
+            '/user/topic/games/' + this.state.tableId + '/player_made_turn',
+            this.handlePlayersTurn
+        );
 
         this.createBackround();
         this.playzoneHighlighting = this.add.rectangle(300, 150, 300, 150, 0xFF9900, 0.5);
@@ -77,6 +83,17 @@ export class Sandbox extends BaseScene {
 
     private swithPlayzoneHighlighting = () => {
         this.playzoneHighlighting.setVisible(!this.playzoneHighlighting.visible);
+    }
+
+    private playCard = (card: Card) => {
+        if (Geom.Rectangle.Contains(this.playzoneHighlighting.getBounds(), card.x, card.y)) {
+            this.socket.publish({
+                destination: '/app/game/' + this.state.tableId + '/turn',
+                body: JSON.stringify({ suite: card.suite, rank: card.rank, x: card.x, y: card.y })
+            });
+        } else {
+            card.returnCard();
+        }
     }
 
     private giveCards = () => {
@@ -204,6 +221,28 @@ export class Sandbox extends BaseScene {
         this.sound.play('take-card-sound');
     }
 
+    private handlePlayersTurn = (message: IMessage) => {
+        let turn = <PlayersTurn>JSON.parse(message.body);
+        if (turn.card && turn.player) {
+            let player = this.players.find(p => p.name.text === turn.player.name);
+
+            if (player && player != this.currentPlayer) {
+                let frame = this.getCardFrame(turn.card.suite, turn.card.rank);
+                let card = this.generateCard(
+                    player.x,
+                    player.y,
+                    frame,
+                    turn.card.suite,
+                    turn.card.rank
+                );
+                this.moveCard(card, turn.x, turn.y);
+            }
+        } else {
+            console.log('smth wnt wrng');
+            console.dir(turn);
+        }
+    }
+
     private createPlayers() {
         this.currentPlayer = this.createPlayer(
             75,
@@ -277,6 +316,7 @@ export class Sandbox extends BaseScene {
         card.suite = suite;
         card.rank = rank;
         card.switchLigting = this.swithPlayzoneHighlighting;
+        card.playCard = this.playCard;
         this.add.existing(card);
         return card;
     }
